@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827"><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
+<title>Study OS</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#171923;background:#f5f7fb}
+*{box-sizing:border-box}body{margin:0}.app{max-width:1100px;margin:auto;padding:20px}
+header{display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+h1,h2,h3,p{margin:0}.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#6b7280}.title{font-size:30px;font-weight:850}.muted{color:#6b7280;font-size:13px}
+nav{display:flex;gap:7px;overflow:auto;padding-bottom:4px;margin-bottom:18px}button,.btn{border:0;border-radius:11px;padding:11px 14px;min-height:44px;font-weight:750;cursor:pointer;background:#e9edf5;color:#171923;white-space:nowrap}
+nav button.active,.primary{background:#171923;color:white}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px}
+.card{background:white;border:1px solid #e3e7ef;border-radius:17px;padding:16px}.stat{font-size:28px;font-weight:900}.section{font-size:19px;font-weight:850;margin:23px 0 10px}
+.progress{height:8px;background:#e9edf3;border-radius:99px;overflow:hidden;margin-top:9px}.fill{height:100%;background:#171923;border-radius:99px}
+.subject{margin-bottom:11px}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.chip{font-size:11px;padding:5px 8px;border-radius:99px;background:#eef1f6;font-weight:700}.chapter{margin-top:8px;padding:11px;border-radius:12px;background:#f5f6f9}
+.chapter-top{display:flex;justify-content:space-between;gap:10px;align-items:center}.steps{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}
+.step{font-size:10px;border:1px solid #dfe3ea;border-radius:8px;padding:6px;background:white;cursor:pointer;min-height:36px}.step.done{background:#171923;color:white;border-color:#171923}
+.exam{margin-bottom:10px}.danger{background:#fff0f0;color:#a11}.good{background:#edf8ef;color:#196b35}
+input{width:100%;padding:11px;border:1px solid #dce1e9;border-radius:10px;background:white;font:inherit;min-height:44px}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.form .full{grid-column:1/-1}.empty{padding:25px;text-align:center;color:#6b7280}
+.toast{position:fixed;right:16px;bottom:16px;background:#171923;color:white;padding:12px 15px;border-radius:12px;display:none;max-width:320px;z-index:5}
+.auth{max-width:430px;margin:55px auto}.auth h2{font-size:26px;margin-bottom:6px}.auth form{display:grid;gap:10px;margin-top:18px}.auth .links{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px}
+.user{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.status{font-size:11px;padding:5px 8px;border-radius:99px;background:#edf8ef;color:#196b35;font-weight:750}
+@media(max-width:760px){.app{padding:14px}.grid{grid-template-columns:1fr 1fr}.form{grid-template-columns:1fr}.form .full{grid-column:auto}.title{font-size:25px}}
+</style></head><body><div class="app">
+<header><div><div class="eyebrow">Personal Study OS</div><div class="title">Study OS</div><div class="muted">Syllabus • Exams • Revisions • Cloud Sync</div></div><div class="user" id="userArea"></div></header>
+<div id="root"></div><div class="toast" id="toast"></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL="https://mqaplkihqisgmkbaavft.supabase.co";
+const SUPABASE_KEY="sb_publishable_0QkK58vVBwb2y99S8_yKnA_z5zl5JPX";
+const client=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const steps=["Study","Practice","PYQs","Revision 1","Revision 2","Mock"];
+let profile=null,subjects=[],exams=[],sessions=0,page="dashboard";
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const toast=t=>{const e=document.getElementById("toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",1800)};
+const stats=()=>{let t=0,d=0,r=0;subjects.forEach(s=>s.chapters.forEach(c=>{t++;d+=c.study?1:0;r+=([c.study,c.practice,c.pyqs,c.revision1,c.revision2,c.mock].filter(Boolean).length)}));return{t,d,r}};
+const readiness=()=>{const s=stats();return s.t?Math.round(s.r/(s.t*6)*100):0};
+const subjectPct=s=>s.chapters.length?Math.round(s.chapters.filter(c=>c.study).length/s.chapters.length*100):0;
+const daysLeft=d=>Math.max(0,Math.ceil((new Date(d+"T00:00:00")-new Date())/86400000));
+
+async function loadData(){
+ const {data:u}=await client.auth.getUser(); if(!u.user)return false;
+ let p=await client.from("profiles").select("*").eq("id",u.user.id).maybeSingle(); profile=p.data;
+ if(!profile){await client.from("profiles").insert({id:u.user.id,name:u.user.email.split("@")[0]});p=await client.from("profiles").select("*").eq("id",u.user.id).single();profile=p.data}
+ const sr=await client.from("subjects").select("*,chapters(*)").order("created_at"); if(sr.error) throw sr.error; subjects=sr.data||[];
+ const er=await client.from("exams").select("*").order("date"); if(er.error) throw er.error; exams=er.data||[];
+ const ss=await client.from("study_sessions").select("id",{count:"exact",head:true}); sessions=ss.count||0; return true;
+}
+function renderAuth(msg=""){
+ document.getElementById("userArea").innerHTML="";
+ document.getElementById("root").innerHTML=`<div class="card auth"><div class="eyebrow">Cloud account</div><h2>Welcome to Study OS</h2><div class="muted">Email + password. Each account has its own study data.</div>
+ <form id="authForm"><input id="email" type="email" placeholder="Email" required><input id="password" type="password" placeholder="Password (6+ characters)" minlength="6" required><button class="btn primary" type="submit">Sign in / Create account</button></form>
+ <div class="links"><button class="btn" id="resetBtn">Forgot password</button></div><p class="muted" id="authMsg" style="margin-top:10px">${esc(msg)}</p></div>`;
+ document.getElementById("authForm").onsubmit=async e=>{e.preventDefault();const email=emailEl.value.trim(),password=passwordEl.value;
+ let r=await client.auth.signInWithPassword({email,password});
+ if(r.error){r=await client.auth.signUp({email,password});if(r.error){authMsg.textContent=r.error.message;return}authMsg.textContent=r.data.session?"Account created.":"Account created; check your email if confirmation is enabled."}
+ await boot()};
+ const emailEl=document.getElementById("email"),passwordEl=document.getElementById("password"),authMsg=document.getElementById("authMsg");
+ document.getElementById("resetBtn").onclick=async()=>{const email=emailEl.value.trim();if(!email)return toast("Enter your email first.");const r=await client.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});toast(r.error?r.error.message:"Password reset email sent.")};
+}
+function shell(){
+ document.getElementById("userArea").innerHTML=`<span class="status">☁ Synced</span><span class="muted">${esc(profile?.name||"Account")}</span><button class="btn" id="logout">Log out</button>`;
+ document.getElementById("logout").onclick=async()=>{await client.auth.signOut();location.reload()};
+ document.getElementById("root").innerHTML=`<nav id="nav"><button data-page="dashboard" class="active">🏠 Dashboard</button><button data-page="syllabus">📚 Syllabus</button><button data-page="exams">📝 Exams</button><button data-page="revisions">🔄 Revisions</button></nav><main id="content"></main>`;
+ document.getElementById("nav").onclick=e=>{if(e.target.matches("button[data-page]")){page=e.target.dataset.page;render()}};
+}
+function dashboard(){
+ const s=stats(),p=Math.round(s.d/(s.t||1)*100),next=exams[0];
+ return `<section class="grid"><div class="card"><div class="stat">${p}%</div><div class="muted">Syllabus complete</div><div class="progress"><div class="fill" style="width:${p}%"></div></div></div>
+ <div class="card"><div class="stat">${s.d}/${s.t}</div><div class="muted">Chapters complete</div></div><div class="card"><div class="stat">${readiness()}%</div><div class="muted">Exam readiness</div></div><div class="card"><div class="stat">${sessions}</div><div class="muted">25-min sessions</div></div></section>
+ <div class="section">📝 Next exam</div><div class="card exam">${next?`<div><h3>${esc(next.name)}</h3><div class="muted">${next.date}</div></div><div><div class="stat">${daysLeft(next.date)}</div><div class="muted">days left</div></div>`:`<div class="empty">No exams yet. Add one from Exams.</div>`}</div>
+ <div class="section">📊 Subjects</div>${subjects.map(s=>`<div class="card subject"><div class="row"><b>${esc(s.name)}</b><b>${subjectPct(s)}%</b></div><div class="muted">${s.chapters.filter(c=>c.study).length}/${s.chapters.length} chapters</div><div class="progress"><div class="fill" style="width:${subjectPct(s)}%"></div></div></div>`).join("")}
+ <div class="section">⚡ Study session</div><div class="card"><button class="btn primary" onclick="addSession()">＋ Complete 25-minute session</button></div>`;
+}
+function syllabus(){
+ return `<div class="muted">Build your own subjects and chapters. Nothing is hard-coded.</div><div class="card" style="margin-top:12px"><div class="form"><input id="subjectName" placeholder="New subject, e.g. Mathematics"><button class="btn primary" onclick="addSubject()">＋ Add subject</button></div></div>
+ ${subjects.map(s=>`<div class="section">${esc(s.name)}</div><div class="card">${s.chapters.map(c=>{const a=[c.study,c.practice,c.pyqs,c.revision1,c.revision2,c.mock];return `<div class="chapter"><div class="chapter-top"><div><b>${esc(c.name)}</b><div class="muted">${a.filter(Boolean).length}/6 stages</div></div><span class="chip">${a.filter(Boolean).length===6?"READY":c.study?"IN PROGRESS":"NOT STARTED"}</span></div><div class="steps">${steps.map((x,k)=>`<button class="step ${a[k]?"done":""}" onclick="toggleStep('${c.id}',${k})">${a[k]?"✓ ":""}${x}</button>`).join("")}</div></div>`}).join("")}
+ <div class="form" style="margin-top:10px"><input id="chapter-${s.id}" placeholder="Add chapter/topic"><button class="btn" onclick="addChapter('${s.id}')">＋ Add chapter</button></div></div>`).join("")}`;
+}
+function examsPage(){
+ return `<div class="card"><div class="form"><input id="examName" placeholder="Exam name"><input id="examDate" type="date"><button class="btn primary full" onclick="addExam()">＋ Add exam</button></div></div>
+ <div class="section">Your exams</div>${exams.length?exams.map(e=>`<div class="card exam"><div class="row"><div><b>${esc(e.name)}</b><div class="muted">${e.date}</div></div><div><div class="stat">${daysLeft(e.date)}</div><div class="muted">days</div></div></div><button class="btn danger" onclick="removeExam('${e.id}')">Delete</button></div>`).join(""):`<div class="card empty">No exams yet.</div>`}`;
+}
+function revisions(){
+ const due=[];subjects.forEach(s=>s.chapters.forEach(c=>{if(c.study&&!c.revision1)due.push([s,c,"Revision 1"]);else if(c.revision1&&!c.revision2)due.push([s,c,"Revision 2"])}));
+ return `<div class="card"><b>🔄 Revision queue</b><p class="muted" style="margin-top:6px">Complete Study first, then mark Revision 1 and Revision 2 from Syllabus.</p></div>
+ <div class="section">${due.length} revision${due.length===1?"":"s"} waiting</div>${due.map(x=>`<div class="card exam"><div><b>${esc(x[1].name)}</b><div class="muted">${esc(x[0].name)} • ${x[2]} due</div></div><button class="btn primary" onclick="page='syllabus';render()">Open syllabus</button></div>`).join("")||`<div class="card good"><b>🎉 Revision queue is clear.</b></div>`}`;
+}
+function render(){document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===page));document.getElementById("content").innerHTML=page==="dashboard"?dashboard():page==="syllabus"?syllabus():page==="exams"?examsPage():revisions()}
+async function addSubject(){const name=document.getElementById("subjectName").value.trim();if(!name)return toast("Enter a subject name.");const uid=(await client.auth.getUser()).data.user.id;const r=await client.from("subjects").insert({user_id:uid,name}).select().single();if(r.error)return toast(r.error.message);subjects.push({...r.data,chapters:[]});render()}
+async function addChapter(subjectId){const el=document.getElementById("chapter-"+subjectId),name=el.value.trim();if(!name)return toast("Enter a chapter/topic.");const uid=(await client.auth.getUser()).data.user.id;const r=await client.from("chapters").insert({subject_id:subjectId,user_id:uid,name}).select().single();if(r.error)return toast(r.error.message);subjects.find(s=>s.id===subjectId).chapters.push(r.data);el.value="";render()}
+async function toggleStep(id,k){const c=subjects.flatMap(s=>s.chapters).find(x=>x.id===id);if(!c)return;const keys=["study","practice","pyqs","revision1","revision2","mock"];c[keys[k]]=!c[keys[k]];const r=await client.from("chapters").update({study:c.study,practice:c.practice,pyqs:c.pyqs,revision1:c.revision1,revision2:c.revision2,mock:c.mock}).eq("id",id);if(r.error)return toast(r.error.message);render()}
+async function addExam(){const name=document.getElementById("examName").value.trim(),date=document.getElementById("examDate").value;if(!name||!date)return toast("Enter exam name and date.");const uid=(await client.auth.getUser()).data.user.id;const r=await client.from("exams").insert({user_id:uid,name,date}).select().single();if(r.error)return toast(r.error.message);exams.push(r.data);exams.sort((a,b)=>a.date.localeCompare(b.date));render()}
+async function removeExam(id){await client.from("exams").delete().eq("id",id);exams=exams.filter(e=>e.id!==id);render()}
+async function addSession(){const uid=(await client.auth.getUser()).data.user.id;const r=await client.from("study_sessions").insert({user_id:uid,duration_minutes:25});if(r.error)return toast(r.error.message);sessions++;toast("Session synced ✓");render()}
+async function boot(){const {data}=await client.auth.getSession();if(!data.session){renderAuth();return}try{if(await loadData()){shell();render()}}catch(e){renderAuth("Database setup is not finished yet. Run supabase_schema.sql first.")}}
+boot();
+</script></body></html>
